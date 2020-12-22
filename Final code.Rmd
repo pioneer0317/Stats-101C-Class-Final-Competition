@@ -1,0 +1,341 @@
+---
+title: "Final"
+author: "Yanhua Lin"
+date: "12/8/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(tidyverse)
+library(readr)
+library(readxl)
+library(randomForest)
+library(lubridate)
+library(caret)
+traincsv <- read.csv("training.csv")
+
+# create additional columns
+training <- traincsv[, -260]
+date_col <- training$PublishedDate
+s <- unlist(strsplit(as.character(date_col), split = " "))
+time <- matrix(s, ncol = 2, byrow = TRUE)[ , 2]
+t <- unlist(strsplit(time, split = ":"))
+h_n_m <- matrix(as.numeric(t), ncol = 2, byrow = TRUE)
+hours <- h_n_m[ ,1] + h_n_m[ ,2] / 60
+Published_date <- matrix(s, ncol = 2, byrow = TRUE)[ ,1]
+Days <- as.numeric(mdy(Published_date) - mdy("3/31/2020"))
+
+
+training$Num_Subscribers_Base_high <- as.numeric((training$Num_Subscribers_Base_low == 0) &
+                                                 (training$Num_Subscribers_Base_low_mid == 0) &
+                                                 (training$Num_Subscribers_Base_mid_high == 0))
+
+training$Num_Views_Base_high <- as.numeric((training$Num_Views_Base_low == 0) &
+                                           (training$Num_Views_Base_low_mid == 0) &
+                                           (training$Num_Views_Base_mid_high == 0))
+
+training$avg_growth_high <- as.numeric((training$avg_growth_low == 0) &
+                                       (training$avg_growth_low_mid == 0) &
+                                       (training$avg_growth_mid_high == 0))
+
+training$count_vids_high <- as.numeric((training$count_vids_low == 0) &
+                                       (training$count_vids_low_mid == 0) &
+                                       (training$count_vids_mid_high == 0))
+
+
+training$midnight <- as.numeric(hours >= 0 & hours < 6)
+training$morning <- as.numeric(hours >= 6 & hours < 12)
+training$afternoon <- as.numeric(hours >= 12 & hours < 18)
+training$night <- as.numeric(hours >= 18 & hours < 24)
+training$hours <- hours
+training$days <- Days
+
+Binary_variable <- training[ ,248:267]
+Binary_variable_names <- colnames(Binary_variable)
+
+# factorize binary columns 
+for (i in 248:267) {
+  training[ , i] <- factor(training[ , i])
+}
+
+
+# complete training data 
+training$growth_2_6 <- traincsv$growth_2_6
+
+dim(training)
+head(training[ ,248:267])
+```
+
+
+
+```{r}
+filtered <- training[ , -c(1, 2, 248:267, 270)] # remove columns of 'id',
+                                                # 'date', 'binary', 'response'
+filtered <- filtered[ , 247:1]
+variances <- apply(filtered, 2, var)
+filtered_variances <- unname(which(variances == 0))
+filtered <- filtered[ , - filtered_variances]  # remove columns with variance = 0
+
+# remove predictors highly correlated
+save_features <- character()
+while(ncol(filtered) > 2) {
+  correlation <- cor(filtered[ , 1], filtered[ , 2 : ncol(filtered)])
+  high_correlated <- names(which(correlation[1, ] > 0.8))
+  left_features <- colnames(filtered)[!(colnames(filtered) %in% high_correlated)]
+  left_features <- left_features[-1]
+  save_features <- c(save_features, names(filtered[1]))
+  filtered <- filtered[ ,left_features] 
+}
+train_left <- as.data.frame(training[ ,save_features])
+
+# adding important columns back
+train_left$views_2_hours <- training$views_2_hours
+train_left$Duration <- training$Duration
+
+Binary_columns <- training[ , 248:267]
+train_left <- cbind(train_left, Binary_columns)
+
+train_left$growth_2_6 <- training$growth_2_6
+
+dim(train_left)
+```
+
+```{r}
+set.seed(1000)
+
+i <- createDataPartition(train_left$growth_2_6, p = 0.828, list = FALSE)
+train <- train_left[i, ]
+test1 <- train_left[-i, ]
+dim(train)
+dim(test1)
+dim(test)
+```
+
+
+```{r}
+rf_w_time <- randomForest(growth_2_6 ~ . , data = train,
+                          mtry = floor((ncol(train) - 1) / 3), ntree = 1000, importance = TRUE)
+
+# importance(rf_w_time)
+rf_pred_w_time <- predict(rf_w_time, test1)
+RMSE_rf_w_time <- sqrt(mean((test1$growth_2_6 - rf_pred_w_time) ^ 2))
+RMSE_rf_w_time
+```
+
+- 1.48893
+- 1.485217
+
+```{r}
+varImp(rf_w_time) %>% arrange(desc(Overall))
+rf_im <- importance(rf_w_time)
+```
+
+
+```{r}
+new_7 <- rownames(rf_im)[which(abs(rf_im[ , 1]) > 7)]
+newdata_7 <- train[ , c(new_7, "growth_2_6")]
+
+rf_7 <- randomForest(growth_2_6 ~ . , data = newdata_7,
+                     mtry = floor((ncol(newdata_7) - 1) / 3), ntree = 1000, importance = TRUE)
+
+rf_pred_7 <- predict(rf_7, test1)
+RMSE_rf_7 <- sqrt(mean((test1$growth_2_6 - rf_pred_7) ^ 2))
+RMSE_rf_7
+```
+
+
+```{r}
+new_8 <- rownames(rf_im)[which(abs(rf_im[ , 1]) > 8)]
+newdata_8 <- train[ , c(new_8, "growth_2_6")]
+
+rf_8 <- randomForest(growth_2_6 ~ . , data = newdata_8,
+                     mtry = floor((ncol(newdata_8) - 1) / 3), ntree = 1000, importance = TRUE)
+
+rf_pred_8 <- predict(rf_8, test1)
+RMSE_rf_8 <- sqrt(mean((test1$growth_2_6 - rf_pred_8) ^ 2))
+RMSE_rf_8
+```
+
+- 1.421445
+- 1.4321
+
+```{r}
+rf_8_14 <- randomForest(growth_2_6 ~ . , data = newdata_8,
+                     mtry = 14, ntree = 1000, importance = TRUE)
+
+rf_pred_8_14 <- predict(rf_8_14, test1)
+RMSE_rf_8_14 <- sqrt(mean((test1$growth_2_6 - rf_pred_8_14) ^ 2))
+RMSE_rf_8_14
+```
+
+- 1.422817
+- 1.430327
+
+```{r}
+rf_8_12 <- randomForest(growth_2_6 ~ . , data = newdata_8,
+                     mtry = 12, ntree = 1000, importance = TRUE)
+
+rf_pred_8_12 <- predict(rf_8_12, test1)
+RMSE_rf_8_12 <- sqrt(mean((test1$growth_2_6 - rf_pred_8_12) ^ 2))
+RMSE_rf_8_12
+```
+
+- 1.425424
+- 1.433916
+
+```{r}
+rf_im <- importance(rf_w_time)
+new_9 <- rownames(rf_im)[which(abs(rf_im[ , 1]) > 9)]
+newdata_9 <- train[ , c(new_9, "growth_2_6")]
+
+rf_9 <- randomForest(growth_2_6 ~ . , data = newdata_9,
+                     mtry = floor((ncol(newdata_9) - 1) / 3), ntree = 1000, importance = TRUE)
+
+rf_pred_9 <- predict(rf_9, test1)
+RMSE_rf_9 <- sqrt(mean((test1$growth_2_6 - rf_pred_9) ^ 2))
+RMSE_rf_9
+```
+
+- 1.423923
+- 1.422455
+
+```{r}
+rf_9_12 <- randomForest(growth_2_6 ~ . , data = newdata_9,
+                     mtry = 12, ntree = 1000, importance = TRUE)
+
+rf_pred_9_12 <- predict(rf_9_12, test1)
+RMSE_rf_9_12 <- sqrt(mean((test1$growth_2_6 - rf_pred_9_12) ^ 2))
+RMSE_rf_9_12
+```
+
+- 1.422035
+- 1.420599
+
+```{r}
+rf_9_10 <- randomForest(growth_2_6 ~ . , data = newdata_9,
+                     mtry = 10, ntree = 1000, importance = TRUE)
+
+rf_pred_9_10 <- predict(rf_9_10, test1)
+RMSE_rf_9_10 <- sqrt(mean((test1$growth_2_6 - rf_pred_9_10) ^ 2))
+RMSE_rf_9_10
+```
+
+- 1.421007
+- 1.424509
+
+```{r}
+new_10 <- rownames(rf_im)[which(abs(rf_im[ , 1]) > 10)]
+newdata_10 <- train[ , c(new_10, "growth_2_6")]
+
+rf_10 <- randomForest(growth_2_6 ~ . , data = newdata_10,
+                     mtry = floor((ncol(newdata_10) - 1) / 3), ntree = 1000, importance = TRUE)
+
+rf_pred_10 <- predict(rf_10, test1)
+RMSE_rf_10 <- sqrt(mean((test1$growth_2_6 - rf_pred_10) ^ 2))
+RMSE_rf_10
+```
+
+- 1.423562
+- 1.421615
+
+```{r}
+rf_10_12 <- randomForest(growth_2_6 ~ . , data = newdata_10,
+                     mtry = 12, ntree = 1000, importance = TRUE)
+
+rf_pred_10_12 <- predict(rf_10_12, test1)
+RMSE_rf_10_12 <- sqrt(mean((test1$growth_2_6 - rf_pred_10_12) ^ 2))
+RMSE_rf_10_12
+
+rf_10_10 <- randomForest(growth_2_6 ~ . , data = newdata_10,
+                     mtry = 10, ntree = 1000, importance = TRUE)
+
+rf_pred_10_10 <- predict(rf_10_10, test1)
+RMSE_rf_10_10 <- sqrt(mean((test1$growth_2_6 - rf_pred_10_10) ^ 2))
+RMSE_rf_10_10
+```
+
+- 1.420103
+- 1.418571
+
+- 1.421501
+- 1.426032
+
+```{r}
+new_11 <- rownames(rf_im)[which(abs(rf_im[ , 1]) > 11)]
+newdata_11 <- train[ , c(new_11, "growth_2_6")]
+
+rf_11 <- randomForest(growth_2_6 ~ . , data = newdata_11,
+                     mtry = floor((ncol(newdata_11) - 1) / 3), ntree = 1000, importance = TRUE)
+
+rf_pred_11 <- predict(rf_11, test1)
+RMSE_rf_11 <- sqrt(mean((test1$growth_2_6 - rf_pred_11) ^ 2))
+RMSE_rf_11
+```
+
+- 1.424145
+
+```{r}
+# predicting
+final_data <- train_left[ , c(new_9[ , -c(34,35)], "growth_2_6")]
+
+final_model <- randomForest(growth_2_6 ~ . , data = final_data,
+                            mtry = 12, ntree = 1000, importance = TRUE)
+
+test <- read.csv("test.csv")
+test$Num_Subscribers_Base_high <- as.numeric((test$Num_Subscribers_Base_low == 0) &
+                                             (test$Num_Subscribers_Base_low_mid == 0) &
+                                             (test$Num_Subscribers_Base_mid_high == 0))
+
+test$Num_Views_Base_high <- as.numeric((test$Num_Views_Base_low == 0) &
+                                       (test$Num_Views_Base_low_mid == 0) &
+                                       (test$Num_Views_Base_mid_high == 0))
+
+test$avg_growth_high <- as.numeric((test$avg_growth_low == 0) & 
+                                   (test$avg_growth_low_mid == 0) & 
+                                   (test$avg_growth_mid_high == 0))
+
+test$count_vids_high <- as.numeric((test$count_vids_low == 0) & 
+                                  (test$count_vids_low_mid == 0) & 
+                                  (test$count_vids_mid_high == 0))
+
+date_col_t <- test$PublishedDate
+s_t <- unlist(strsplit(as.character(date_col_t), split = " "))
+time_t <- matrix(s_t, ncol = 2, byrow = TRUE)[ , 2]
+t_t <- unlist(strsplit(time_t, split = ":"))
+h_n_m_t <- matrix(as.numeric(t_t), ncol = 2, byrow = TRUE)
+hours_t <- h_n_m_t[ ,1] + h_n_m_t[ ,2] / 60
+Published_date_t <- matrix(s_t, ncol = 2, byrow = TRUE)[ ,1]
+Days_t <- as.numeric(mdy(Published_date_t) - mdy("3/31/2020"))
+
+test$midnight <- as.numeric(hours_t >= 0 & hours_t < 6) 
+test$morning <- as.numeric(hours_t >= 6 & hours_t < 12)
+test$afternoon <- as.numeric(hours_t >= 12 & hours_t < 18)
+test$night <- as.numeric(hours_t >= 18 & hours_t < 24)
+test$hours <- hours_t
+test$days <- Days_t
+
+# factorize binary columns 
+for (i in 248:267) {
+  test[ , i] <- factor(test[ , i])
+}
+
+newtest <- test[ , new_9]
+
+pred_test <- predict(final_model, newdata = newtest)
+
+result_w_days <- data.frame(test$id, pred_test)
+colnames(result_w_days) <- c("id", "growth_2_6")
+
+write.csv(result_w_days, "result_w_days_9_12_35.csv", row.names = FALSE)
+
+```
+
+```{r}
+varImp(final_model) %>% arrange(desc(Overall))
+```
+
