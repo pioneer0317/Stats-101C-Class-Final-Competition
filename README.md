@@ -24,4 +24,4 @@ report is also included in the pdf file.
 Our final presentation can be found in youtube: https://www.youtube.com/watch?v=sZxqn6EQNjg
 
 ## Results 
-Our team placed 1st place with the RMSE of 1.37819. 
+Our team won 1st place with the RMSE of 1.37819. 
